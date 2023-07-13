@@ -6,7 +6,7 @@ and then prints the encoder feedback.
 
 Assumes that the ODrive is already configured for velocity control.
 
-See https://docs.odriverobotics.com/v/latest/can-protocol.html for protocol
+See https://docs.odriverobotics.com/v/latest/manual/can-protocol.html for protocol
 documentation.
 """
 
