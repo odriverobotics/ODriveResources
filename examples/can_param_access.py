@@ -92,7 +92,7 @@ for msg in bus:
         break
 
 # Unpack and print reply
-_, _, _, return_value = struct.unpack('<BHB' + format_lookup[endpoint_type], msg.data)
+_, _, _, return_value = struct.unpack_from('<BHB' + format_lookup[endpoint_type], msg.data)
 print(f"received: {return_value}")
 # -- end read
 
