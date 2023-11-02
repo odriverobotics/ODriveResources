@@ -50,9 +50,10 @@ STATE_TRANSITION_TIMEOUT = 0.5
 
 WHEEL_DIAMETER = 171 # [mm]
 WHEEL_SPACING = 419 # [mm]
+WHEEL_CIRCUMFERENCE = 3.1415 * WHEEL_DIAMETER # [mm]
 
-VEL_COEF = 1000 / WHEEL_DIAMETER
-YAW_COEF = WHEEL_SPACING / WHEEL_DIAMETER
+VEL_COEF = 1000 / WHEEL_CIRCUMFERENCE
+YAW_COEF = WHEEL_SPACING / WHEEL_CIRCUMFERENCE
 
 AXIS_STATE_UNDEFINED = 0
 AXIS_STATE_IDLE = 1
@@ -134,6 +135,12 @@ class ODriveCAN():
 def user_space_to_axis_space(vel, yaw):
     vel_left = VEL_COEF * vel + YAW_COEF * yaw
     vel_right = VEL_COEF * vel - YAW_COEF * yaw
+    # If vel_left or vel_right is greater than max botwheel speed, scale values
+    vel_abs_max = max(abs(vel_left), abs(vel_right))
+    if vel_abs_max > BOTWHEEL_MAX_VEL:
+        scaling_factor = BOTWHEEL_MAX_VEL / vel_abs_max
+        vel_left *= scaling_factor
+        vel_right *= scaling_factor
     return (vel_left * LEFT_DIR, vel_right * RIGHT_DIR)
 
 def axis_space_to_user_space(vel_left, vel_right):
