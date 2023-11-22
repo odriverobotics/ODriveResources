@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BotWheel Explorer Remote Control</title>
+    <style>
+        html,
+        body {
+            overflow: hidden;
+        }
+
+        p,
+        ul {
+            margin-block-start: 0px;
+            margin-block-end: 0px;
+        }
+
+        ul {
+            padding-inline-start: 15px;
+        }
+
+        th {
+            text-align: start;
+        }
+
+        fieldset {
+            padding: 5px;
+        }
+
+        #controlsBox {
+            padding: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #telemetryTable {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 10pt;
+        }
+
+        #telemetryTable th {
+            background-color: #f2f2f2;
+            color: #333;
+            padding: 3px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+
+        #telemetryTable td {
+            padding: 3px;
+            border: 1px solid #ddd;
+            overflow-wrap: anywhere;
+        }
+
+        #telemetryTable tr:nth-child(odd) {
+            background-color: #f9f9f9;
+        }
+
+        #telemetryTable tr td:nth-child(2n) {
+            background-color: #f9f9f9;
+        }
+
+        #joystickBox {
+            touch-action: none;
+            background-color: rgb(227, 255, 255);
+            flex-grow: 1;
+            position: relative;
+            width: 100%;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+
+        .center-line {
+            position: absolute;
+            background-color: black;
+        }
+
+        .vertical-line {
+            width: 1px;
+            height: 100%;
+            left: 50%;
+            top: 0;
+        }
+
+        .horizontal-line {
+            width: 100%;
+            height: 1px;
+            top: 50%;
+            left: 0;
+        }
+
+        .joystickBall {
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #setpointBall {
+            border: 5px solid blue;
+            background-color: transparent;
+        }
+
+        #feedbackBall {
+            background-color: rgb(18, 156, 0);
+            position: absolute;
+        }
+
+        #imuButton {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 33.33%;
+            /* Covering lower third */
+            background-color: black;
+            /* Semi-transparent */
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            opacity: 0.4;
+            font-size: 6vw;
+        }
+
+        #popoverBackdrop {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            backdrop-filter: blur(3px), brightness(60%);
+            background-color: rgba(0, 0, 0, 0.4);
+        }
+
+        #popoverContent {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            max-width: 500px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            background-color: #fff;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        #connectionControls {
+            display: flex;
+            gap: 10px;
+            padding-bottom: 5px;
+        }
+
+        #address {
+            flex: 1;
+            width: 100%;
+        }
+
+        #inputList {
+            font-size: 10pt;
+        }
+    </style>
+    <script>
+        const MAX_VEL = 1; // [m/s]
+        const MAX_YAW = 0.5; // [turns/s]
+        const MIN_VEL_GAIN = 0.3;
+        const MAX_VEL_GAIN = 30;
+        const MIN_VEL_INTEGRATOR_GAIN = 2.5;
+        const MAX_VEL_INTEGRATOR_GAIN = 250;
+
+        let webSocket;
+        let lastGains = { vel_gain: null, vel_integrator_gain: null }; // invalid by default
+        let lastCommand = { vel: 0.0, yaw: 0.0, state: null };
+        let lastTelemetry = { vel: 0.0, yaw: 0.0, state: 'disconnected' };
+
+        function adjustHeight() {
+            document.body.style.height = window.innerHeight + 'px';
+        }
+
+        window.addEventListener('resize', adjustHeight);
+        window.addEventListener('load', adjustHeight);
+        window.addEventListener("resize", (event) => updateControlCanvas());
+
+        function setPopover(show) {
+            var popover = document.getElementById('popoverBackdrop');
+            if (show) {
+                popover.style.display = 'block';
+            } else {
+                popover.style.display = 'none';
+            }
+        }
+
+        // Connection logic ----------------------------------------------------
+
+        document.addEventListener('DOMContentLoaded', (event) => {
+            // Check for the #autoconnect anchor in the URL
+            if (window.location.hash === '#autoconnect') {
+                const addressField = document.getElementById('address');
+                addressField.value = (window.location.protocol == 'https:' ? 'wss:' : 'ws:') + '//' + window.location.hostname + ':8080';
+                connect();
+            } else {
+                const storedAddress = sessionStorage.getItem('websocketAddress');
+                if (storedAddress) {
+                    document.getElementById('address').value = storedAddress;
+                } else {
+                    document.getElementById('address').value = 'ws://192.168.1.2:8080';
+                }
+            }
+        });
+
+        function updateConnectionStatus(text, color) {
+            document.getElementById('status').textContent = text;
+            document.getElementById('status').style.color = color;
+            document.getElementById('connectionStatus').textContent = text;
+            document.getElementById('connectionStatus').style.color = color;
+        }
+
+        function connect() {
+            document.getElementById('address').disabled = true;
+
+            const address = document.getElementById('address').value;
+            // Store persistently
+            sessionStorage.setItem('websocketAddress', address);
+
+            webSocket = new WebSocket(address);
+
+            updateConnectionStatus('connecting...', 'black');
+            document.getElementById('connectBtn').textContent = 'Disconnect';
+
+            webSocket.onopen = function (event) {
+                console.log("Connected to WebSocket server.");
+                updateConnectionStatus('connected', 'green');
+                document.getElementById('connectBtn').textContent = 'Disconnect';
+                document.getElementById('coastBtn').disabled = false;
+                document.getElementById('vel_gain').disabled = false;
+                document.getElementById('vel_integrator_gain').disabled = false;
+                document.getElementById('driveBtn').disabled = false;
+            };
+
+            webSocket.onclose = function (event) {
+                console.log("Disconnected from WebSocket server.");
+                updateConnectionStatus('disconnected', 'red');
+                document.getElementById('connectBtn').textContent = 'Connect';
+                document.getElementById('coastBtn').disabled = true;
+                document.getElementById('driveBtn').disabled = true;
+                document.getElementById('vel_gain').disabled = true;
+                document.getElementById('vel_integrator_gain').disabled = true;
+                document.getElementById('address').disabled = false;
+                webSocket = null;
+            };
+
+            webSocket.onerror = function (event) {
+                console.error("WebSocket error observed:", event);
+                updateConnectionStatus('connection failed', 'orange');
+            };
+
+            webSocket.onmessage = function (event) {
+                lastTelemetry = JSON.parse(event.data);
+
+                document.getElementById('status').textContent = 'state: ' + lastTelemetry['state'];
+
+                clearTable();  // Clear previous data
+                addToTable(lastTelemetry.odrives.left);
+                addToTable(lastTelemetry.odrives.right);
+
+                updateControlCanvas();
+
+                if ('config' in lastTelemetry) {
+                    updateSliderFromSocket(document.getElementById('vel_gain'), document.getElementById('vel_gain_value'), MIN_VEL_GAIN, MAX_VEL_GAIN, lastTelemetry.config.vel_gain)
+                    updateSliderFromSocket(document.getElementById('vel_integrator_gain'), document.getElementById('vel_integrator_gain_value'), MIN_VEL_INTEGRATOR_GAIN, MAX_VEL_INTEGRATOR_GAIN, lastTelemetry.config.vel_integrator_gain)
+                }
+            };
+        }
+
+        function toggleConnection() {
+            if (webSocket) {
+                webSocket.close();
+            } else {
+                connect();
+            }
+        }
+
+        const errorFlagsNone = 'NONE';
+        const errorFlags = {
+            0x00000001: "INITIALIZING",
+            0x00000002: "SYSTEM_LEVEL",
+            0x00000004: "TIMING_ERROR",
+            0x00000008: "MISSING_ESTIMATE",
+            0x00000010: "BAD_CONFIG",
+            0x00000020: "DRV_FAULT",
+            0x00000040: "MISSING_INPUT",
+            0x00000100: "DC_BUS_OVER_VOLTAGE",
+            0x00000200: "DC_BUS_UNDER_VOLTAGE",
+            0x00000400: "DC_BUS_OVER_CURRENT",
+            0x00000800: "DC_BUS_OVER_REGEN_CURRENT",
+            0x00001000: "CURRENT_LIMIT_VIOLATION",
+            0x00002000: "MOTOR_OVER_TEMP",
+            0x00004000: "INVERTER_OVER_TEMP",
+            0x00008000: "VELOCITY_LIMIT_VIOLATION",
+            0x00010000: "POSITION_LIMIT_VIOLATION",
+            0x01000000: "WATCHDOG_TIMER_EXPIRED",
+            0x02000000: "ESTOP_REQUESTED",
+            0x04000000: "SPINOUT_DETECTED",
+            0x08000000: "BRAKE_RESISTOR_DISARMED",
+            0x10000000: "THERMISTOR_DISCONNECTED",
+            0x40000000: "CALIBRATION_ERROR"
+        };
+
+        function decodeFlags(code, flagNames, flagNone) {
+            if (code === null || code === undefined) return '??';
+
+            let parts = [];
+            for (let flag in flagNames) {
+                if (code & flag) {
+                    parts.push(flagNames[flag]);
+                    code &= ~flag;
+                }
+            }
+
+            if (code) {
+                parts.push('0x' + code.toString(16).toUpperCase());
+            }
+
+            return parts.length ? parts.join(" | ") : flagNone;
+        }
+
+
+        function clearTable() {
+            const rows = Array.from(document.querySelectorAll('#telemetryTable tr')).slice(1);
+            rows.forEach(row => {
+                // Keep only the first cell (the row label)
+                while (row.cells.length > 1) {
+                    row.deleteCell(1);
+                }
+            });
+        }
+
+        function addToTable(telemetry) {
+            function format(val, digits) {
+                return (val === null || val === undefined) ? '??' : val.toFixed(digits);
+            }
+            //document.getElementById('stateRow').insertAdjacentHTML('beforeend', `<td>${telemetry.state}</td>`);
+            document.getElementById('errorRow').insertAdjacentHTML('beforeend', `<td>${decodeFlags(telemetry.error, errorFlags, errorFlagsNone)}</td>`);
+            document.getElementById('dcBusRow').insertAdjacentHTML('beforeend', `<td>${format(telemetry.dc_voltage, 1)} V, ${format(telemetry.dc_current, 1)} A</td>`);
+            document.getElementById('torqueRow').insertAdjacentHTML('beforeend', `<td>${format(telemetry.torque_setpoint, 2)} Nm</td>`);
+            document.getElementById('tempRow').insertAdjacentHTML('beforeend', `<td>${format(telemetry.fet_temp, 1)} °C / ${format(telemetry.motor_temp, 1)} °C</td>`);
+        }
+
+
+        document.addEventListener('DOMContentLoaded', (event) => {
+            addToTable({});
+            addToTable({});
+        });
+
+        function requestState(state) {
+            updateCommand(state)
+        }
+
+        // Gains input handling -----------------------------------------------
+
+        function updateSliderFromUser(slider, label, minVal, maxVal) {
+            const sliderVal = parseFloat(slider.value);
+            const actualVal = Math.exp(Math.log(maxVal) * sliderVal + Math.log(minVal) * (1 - sliderVal));
+            label.textContent = actualVal.toFixed(3);
+            return actualVal;
+        }
+
+        function updateSliderFromSocket(slider, label, minVal, maxVal, actualVal) {
+            const sliderValue = (Math.log(actualVal) - Math.log(minVal)) / (Math.log(maxVal) - Math.log(minVal));  // The last term represents the minimum slider value
+            slider.value = sliderValue;
+            label.textContent = actualVal.toFixed(3);
+        }
+
+        function updateGains() {
+            const gains = {
+                vel_gain: updateSliderFromUser(document.getElementById('vel_gain'), document.getElementById('vel_gain_value'), MIN_VEL_GAIN, MAX_VEL_GAIN),
+                vel_integrator_gain: updateSliderFromUser(document.getElementById('vel_integrator_gain'), document.getElementById('vel_integrator_gain_value'), MIN_VEL_INTEGRATOR_GAIN, MAX_VEL_INTEGRATOR_GAIN)
+            };
+
+            if (lastGains.vel_gain != gains.vel_gain || lastGains.vel_integrator_gain != gains.vel_integrator_gain) {
+                console.log(gains);
+                if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+                    webSocket.send(JSON.stringify({ 'config': gains }));
+                }
+                lastGains = gains;
+            }
+        }
+
+        // Common input handling -----------------------------------------------
+
+        function clamp(value, min, max) {
+            return Math.min(Math.max(value, min), max);
+        }
+        const sum = (arr) => arr.reduce((a, b) => a + b, 0);
+
+        function updateCommand(requestedState = null) {
+            const commands = [
+                getMouseCommand(),
+                getKeyboardCommand(),
+                ...navigator.getGamepads().map((g) => getGamepadCommand(g)),
+                getImuCommand(),
+            ];
+
+            const command = {
+                vel: MAX_VEL * clamp(sum(commands.map((c) => c.vel)), -1.0, 1.0),
+                yaw: MAX_YAW * clamp(sum(commands.map((c) => c.yaw)), -1.0, 1.0),
+                state: requestedState,
+            }
+
+            if (lastCommand.vel != command.vel || lastCommand.yaw != command.yaw || command.state != null) {
+                console.log(command);
+                if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+                    webSocket.send(JSON.stringify(command));
+                }
+                lastCommand = command;
+                updateControlCanvas();
+            }
+        }
+
+        function positionControlCanvasElement(element, vel, yaw) {
+            const box = document.getElementById('joystickBox');
+
+            const x = box.offsetWidth / 2 + yaw / MAX_YAW * (box.offsetWidth / 2 - element.offsetWidth / 2);
+            const y = box.offsetHeight / 2 - vel / MAX_VEL * (box.offsetHeight / 2 - element.offsetHeight / 2);
+
+            element.style.left = `${x}px`;
+            element.style.top = `${y}px`;
+        }
+
+        function updateControlCanvas() {
+            positionControlCanvasElement(document.getElementById('setpointBall'), lastCommand.vel, lastCommand.yaw);
+            positionControlCanvasElement(document.getElementById('feedbackBall'), lastTelemetry.vel, lastTelemetry.yaw);
+        }
+
+
+        // Pointer input -------------------------------------------------------
+
+        let pointerCommands = {};
+
+        function handlePointerDown(event) {
+            pointerCommands[event.pointerId] = {
+                origin: { x: event.clientX, y: event.clientY },
+                latest: { x: event.clientX, y: event.clientY }
+            };
+            event.target.setPointerCapture(event.pointerId);
+        }
+
+        function handlePointerMove(event) {
+            if (pointerCommands[event.pointerId]) {
+                pointerCommands[event.pointerId].latest = { x: event.clientX, y: event.clientY };
+                updateCommand();
+            }
+        }
+
+        function handlePointerUp(event) {
+            delete pointerCommands[event.pointerId];
+            updateCommand();
+            event.target.releasePointerCapture(event.pointerId);
+        }
+
+        function getMouseCommand() {
+            const joystickBox = document.getElementById('joystickBox');
+            const x = Math.min(Math.max(sum(Object.values(pointerCommands).map((cmd) => cmd.latest.x - cmd.origin.x)) / joystickBox.offsetWidth * 2, -1), 1);
+            const y = Math.min(Math.max(-sum(Object.values(pointerCommands).map((cmd) => cmd.latest.y - cmd.origin.y)) / joystickBox.offsetHeight * 2, -1), 1);
+            return {
+                vel: 0.4 * y + 0.6 * y * Math.abs(y),
+                yaw: 0.4 * x + 0.6 * x * Math.abs(x)
+            };
+        }
+
+
+        // Keyboard input ------------------------------------------------------
+
+        const keys = new Set();
+
+        window.addEventListener('keydown', event => {
+            if (event.target instanceof HTMLInputElement ||
+                event.target instanceof HTMLTextAreaElement) {
+                return;  // Ignore key press if an input field or text area is focused
+            }
+            keys.add(event.key.toLowerCase());
+            updateCommand();
+        });
+
+        window.addEventListener('keyup', event => {
+            keys.delete(event.key.toLowerCase());
+            updateCommand();
+        });
+
+        function getKeyboardCommand() {
+            const multiplier = keys.has('shift') ? 1.0 : 0.3;
+            return {
+                vel: multiplier * (keys.has('arrowup') - keys.has('arrowdown') + keys.has('w') - keys.has('s')),
+                yaw: multiplier * (keys.has('arrowright') - keys.has('arrowleft') + keys.has('d') - keys.has('a'))
+            };
+        }
+
+
+        // Gamepad input -------------------------------------------------------
+
+        window.addEventListener("gamepadconnected", function (e) {
+            console.log("Gamepad connected:", e.gamepad);
+            updateJoystickList();
+            requestAnimationFrame(updateGamepadState);
+        });
+
+        window.addEventListener("gamepaddisconnected", function (e) {
+            console.log("Gamepad disconnected:", e.gamepad);
+            updateJoystickList();
+        });
+
+        function updateGamepadState() {
+            updateCommand();
+
+            // Stop loop when all gamepads are disconnected (but after sending zero-command)
+            if (!navigator.getGamepads().length) {
+                return;
+            }
+
+            requestAnimationFrame(updateGamepadState);
+        }
+
+        function getGamepadCommand(gamepad) {
+            if (gamepad == null) {
+                return { vel: 0.0, yaw: 0.0 };
+            }
+            return {
+                vel: gamepad.axes[2],
+                yaw: gamepad.axes[3]
+            };
+        }
+
+        function updateJoystickList() {
+            const gamepads = navigator.getGamepads();
+            const inputList = document.getElementById('inputList');
+
+            // Remove existing joystick items
+            document.querySelectorAll('#inputList #joystickItem').forEach(item => item.remove());;
+
+            let anyGamepad = false;
+            for (let i = 0; i < gamepads.length; i++) {
+                if (gamepads[i]) {
+                    anyGamepad = true;
+                    const listItem = document.createElement('li');
+                    listItem.id = 'joystickItem';
+                    listItem.textContent = `Gamepad ${i}: ${gamepads[i].id}`;
+                    inputList.appendChild(listItem);
+                }
+            }
+
+            document.getElementById('joystickStatus').style.display = anyGamepad ? 'none' : 'list-item';
+        }
+
+
+        // IMU input -----------------------------------------------------------
+
+        let hasImu = false;
+        let imuButtonPressed = false;
+        let imuZeroPoint = { alpha: 0, beta: 0, gamma: 0 };
+        let imuLatestState = { alpha: 0, beta: 0, gamma: 0 };
+
+        document.addEventListener('DOMContentLoaded', (event) => {
+            requestOrientationPermission();
+        });
+
+        function updateImuStatus(imuStatus, showPermissionButton) {
+            document.getElementById('imuStatus').textContent = 'IMU: ' + imuStatus;
+            document.getElementById('imuPermissionButton').style.display = showPermissionButton ? 'block' : 'none';
+        }
+
+        async function requestOrientationPermission() {
+            if (!('ondeviceorientation' in window)) {
+                updateImuStatus('not supported on this browser', false);
+                return;
+            }
+
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const permissionState = await DeviceOrientationEvent.requestPermission();
+                    if (permissionState !== 'granted') {
+                        updateImuStatus(permissionState, true);
+                        return;
+                    }
+                } catch (error) {
+                    updateImuStatus('user permission required', true);
+                    return;
+                }
+            }
+
+            updateImuStatus('', false); // empty status for a brief moment
+            window.addEventListener('deviceorientation', handleOrientation);
+        }
+
+        function handleOrientation(event) {
+            const beta = event.beta;
+            const gamma = event.gamma;
+
+            if (typeof beta !== "number" || typeof gamma !== "number") {
+                updateImuStatus('not supported on this device', false);
+                return;
+            }
+
+            if (!hasImu) {
+                hasImu = true;
+                document.getElementById('imuButton').style.display = 'flex';
+                updateImuStatus('available', false);
+            }
+
+            imuLatestState = { alpha: event.alpha, beta: event.beta, gamma: event.gamma };
+
+            updateCommand();
+        }
+
+        function handleImuButton(event, isPressed) {
+            event.preventDefault();  // Prevent default browser behaviors
+            event.stopPropagation();  // Stop the event from propagating to ancestors
+
+            document.getElementById('imuButton').style.opacity = isPressed ? 0.2 : 0.4;
+
+            imuButtonPressed = isPressed;
+            if (isPressed) {
+                imuZeroPoint = { ...imuLatestState };  // Save the latest IMU state as the "zero point" when the button is pressed
+            }
+
+            updateCommand();
+        }
+
+        function getImuCommand() {
+            if (!imuButtonPressed) {
+                return { vel: 0, yaw: 0 };
+            }
+            // alpha is the device's yaw
+            const deltaAlpha = (((imuLatestState.alpha - imuZeroPoint.alpha) + 180) % 360) - 180;
+            const deltaBeta = imuLatestState.beta - imuZeroPoint.beta;
+            const deltaGamma = imuLatestState.gamma - imuZeroPoint.gamma;
+            return {
+                vel: Math.min(Math.max(-deltaBeta / 20, -1), 1),  // Normalize to range [-1, 1]
+                yaw: Math.min(Math.max((deltaGamma) / 30, -1), 1)  // Normalize to range [-1, 1]
+            };
+        }
+    </script>
+</head>
+
+<body style="display: flex; flex-direction: column; height: 100vh; margin: 0;">
+    <span id="controlsBox">
+        <span>
+            <button id="coastBtn" disabled onclick="requestState('coast')">Coast</button>
+            <button id="driveBtn" disabled onclick="requestState('drive')">Drive</button>
+            <span id="status" style="color:red">disconnected</span>
+        </span>
+        <button id="settingsButton" onclick="setPopover(true)">Settings</button>
+    </span>
+
+    <table id="telemetryTable">
+        <tr>
+            <th>Telemetry</th>
+            <th>Left</th>
+            <th>Right</th>
+        </tr>
+        <!--<tr id="stateRow">
+            <td>State</td>
+        </tr>-->
+        <tr id="errorRow">
+            <td>Error</td>
+        </tr>
+        <tr id="dcBusRow">
+            <td>DC Bus (V / A)</td>
+        </tr>
+        <tr id="torqueRow">
+            <td>Torque (Nm)</td>
+        </tr>
+        <tr id="tempRow">
+            <td>Temp (ODrive/Motor)</td>
+        </tr>
+    </table>
+
+    <div id="joystickBox" onpointerdown="handlePointerDown(event)" onpointermove="handlePointerMove(event)"
+        onpointerup="handlePointerUp(event)" onpointercancel="handlePointerUp(event)">
+        <div class="center-line vertical-line"></div>
+        <div class="center-line horizontal-line"></div>
+        <div id="setpointBall" class="joystickBall"></div>
+        <div id="feedbackBall" class="joystickBall"></div>
+
+        <div id="imuButton" style="display:none;" onmousedown="handleImuButton(event, true)"
+            onmouseup="handleImuButton(event, false)" onpointerdown="handleImuButton(event, true)"
+            onpointerup="handleImuButton(event, false)" onpointercancel="handleImuButton(event, false)">
+            HOLD TO USE IMU
+        </div>
+    </div>
+
+    <div id="popoverBackdrop" onclick="setPopover(false)">
+        <div id="popoverContent" onclick="event.stopPropagation();">
+            <fieldset>
+                <legend>Connection</legend>
+                <div id="connectionControls">
+                    <input type="text" id="address" />
+                    <button id="connectBtn" onclick="toggleConnection()">Connect</button>
+                </div>
+                <span id="connectionStatus" style="color:red">disconnected</span>
+            </fieldset>
+            <fieldset>
+                <legend>Inputs</legend>
+                <ul id="inputList">
+                    <li>Mouse / Touch: press and drag on the main control area.</li>
+                    <li>Keyboard: use the arrow keys or W/A/S/D. Use shift to go faster.</li>
+                    <li>
+                        <p id="imuStatus">IMU: not available</p>
+                        <button id="imuPermissionButton" style="display:none;"
+                            onclick="requestOrientationPermission()">Use
+                            IMU</button>
+                    </li>
+                    <li id="joystickStatus">Joystick: Will show up here when connected.</li>
+                </ul>
+            </fieldset>
+            <fieldset>
+                <legend>Gains</legend>
+                <div style="width: 100%;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <label for="vel_gain">Velocity Gain:</label>
+                        <span id="vel_gain_value" style="text-align: right;">1</span>
+                    </div>
+                    <input type="range" id="vel_gain" min="0" max="1" step="0.001" oninput="updateGains()" value="0"
+                        disabled style="width: 100%;" />
+                    <div style="display: flex; justify-content: space-between;">
+                        <label for="vel_integrator_gain">Velocity Integrator Gain:</label>
+                        <span id="vel_integrator_gain_value" style="text-align: right;">1</span>
+                    </div>
+                    <input type="range" id="vel_integrator_gain" min="0" max="1" step="0.001" oninput="updateGains()"
+                        value="0" disabled style="width: 100%;" />
+                </div>
+            </fieldset>
+            <span style="align-items: center; display: flex; justify-content: center; margin-top: 5px;"><button
+                    onclick="setPopover(false)">Close</button></span>
+        </div>
+    </div>
+
+</body>
+
+</html>

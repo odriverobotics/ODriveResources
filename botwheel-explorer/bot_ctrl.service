@@ -1,0 +1,13 @@
+[Unit]
+Description=Robot Control Script
+
+[Service]
+Environment="PYTHONUNBUFFERED=true"
+ExecStartPre=+ip link set can0 down
+ExecStartPre=+ip link set can0 up type can bitrate 250000
+ExecStart=python3 ${HOME}/ODriveResources/botwheel-explorer/bot_ctrl.py --can can0 --ssl
+Restart=always
+User=pi
+
+[Install]
+WantedBy=multi-user.target
