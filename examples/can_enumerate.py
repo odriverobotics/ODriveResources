@@ -237,7 +237,9 @@ async def set_addresses(bus: can.Bus, sn_to_node_id: Dict[int, int]):
 
 async def main():
     parser = argparse.ArgumentParser(description="Interactive ODrive identification script.")
-    parser.add_argument("--can", type=str, default='true', help="CAN interface, e.g. 'can0'")
+    parser.add_argument('-i', '--interface', type=str, default='socketcan', help='Interface type (e.g., socketcan, slcan). Default is socketcan.')
+    parser.add_argument('-c', '--channel', type=str, required=True, help='Channel/path/interface name of the device (e.g., can0, /dev/tty.usbmodem11201).')
+    parser.add_argument('-b', '--bitrate', type=int, default=250000, help='Bitrate for CAN bus. Default is 250000.')
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--reboot-all", action='store_true',
                     help="Broadcast reboot command to all ODrives before running discovery. "
@@ -267,46 +269,47 @@ async def main():
                 sys.exit(1)
             user_addresses[parts[0]] = num
 
-    bus = can.interface.Bus(channel=args.can, bustype='socketcan')
+    with can.interface.Bus(args.channel, bustype=args.interface, bitrate=args.bitrate) as bus:
+        if args.reboot_all:
+            print("Broadcasting reboot command...")
+            reboot_msg(bus, BROADCAST_NODE_ID, REBOOT_ACTION_REBOOT)
 
-    if args.reboot_all:
-        print("Broadcasting reboot command...")
-        reboot_msg(bus, BROADCAST_NODE_ID, REBOOT_ACTION_REBOOT)
+        if args.erase_all:
+            print("Broadcasting erase command...")
+            reboot_msg(bus, BROADCAST_NODE_ID, REBOOT_ACTION_ERASE)
+        
+        # Run discovery
+        discovered_devices = await scan_for_devices(bus)
 
-    if args.erase_all:
-        print("Broadcasting erase command...")
-        reboot_msg(bus, BROADCAST_NODE_ID, REBOOT_ACTION_ERASE)
-    
-    # Run discovery
-    discovered_devices = await scan_for_devices(bus)
+        if len(user_labels):
+            ok, node_to_label = identify_ui(bus, discovered_devices.values(), user_labels)
 
-    if len(user_labels):
-        ok, node_to_label = identify_ui(bus, discovered_devices.values(), user_labels)
+            sn_to_label = [
+                (sn, node_to_label[node_id])
+                for sn, node_id in discovered_devices.items()
+                if node_id in node_to_label
+            ]
+            sn_to_target_addr = [
+                (sn, user_addresses[label])
+                for sn, label in sn_to_label
+                if (label in user_addresses)
+            ]
 
-        sn_to_label = [
-            (sn, node_to_label[node_id])
-            for sn, node_id in discovered_devices.items()
-            if node_id in node_to_label
-        ]
-        sn_to_target_addr = [
-            (sn, user_addresses[label])
-            for sn, label in sn_to_label
-            if (label in user_addresses)
-        ]
+            # Filter out the nodes that already are on the target address
+            sn_to_new_addr = [(sn, node_id) for sn, node_id in sn_to_target_addr if node_id != discovered_devices[sn]]
 
-        # Filter out the nodes that already are on the target address
-        sn_to_new_addr = [(sn, node_id) for sn, node_id in sn_to_target_addr if node_id != discovered_devices[sn]]
+            if len(sn_to_new_addr):
+                print(f"Assigning new node IDs to {len(sn_to_new_addr)} ODrives")
+                await set_addresses(bus, sn_to_new_addr)
 
-        if len(sn_to_new_addr):
-            print(f"Assigning new node IDs to {len(sn_to_new_addr)} ODrives")
-            await set_addresses(bus, sn_to_new_addr)
+            if len(sn_to_target_addr) and args.save_config:
+                print(f"Saving configuration on {len(sn_to_target_addr)} ODrives")
+                for sn, node_id in sn_to_target_addr:
+                    reboot_msg(bus, node_id, REBOOT_ACTION_SAVE)
+        else:
+            ok = True
 
-        if len(sn_to_target_addr) and args.save_config:
-            print(f"Saving configuration on {len(sn_to_target_addr)} ODrives")
-            for sn, node_id in sn_to_target_addr:
-                reboot_msg(bus, node_id, REBOOT_ACTION_SAVE)
-    else:
-        ok = True
+        await asyncio.sleep(0.1) # needed for last message to get through on SLCAN backend
 
     sys.exit(0 if ok else 1)
 
