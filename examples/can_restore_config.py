@@ -4,6 +4,7 @@ import asyncio
 import can
 from dataclasses import dataclass
 import json
+import math
 import struct
 from can_simple_utils import CanSimpleNode, REBOOT_ACTION_SAVE # if this import fails, make sure you copy the whole folder from the git repository
 
@@ -78,7 +79,7 @@ class EndpointAccess():
         # Unpack and cpmpare reply
         _, _, _, return_value = struct.unpack_from('<BHB' + endpoint_fmt, msg.data)
         val_pruned = val if endpoint_type != 'float' else struct.unpack('<f', struct.pack('<f', val))[0]
-        if return_value != val_pruned:
+        if return_value != val_pruned or (math.isnan(return_value) and math.isnan(val_pruned)):
             raise Exception(f"failed to write {path}: {return_value} != {val_pruned}")
 
 
