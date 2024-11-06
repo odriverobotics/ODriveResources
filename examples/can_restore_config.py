@@ -79,8 +79,11 @@ class EndpointAccess():
         # Unpack and cpmpare reply
         _, _, _, return_value = struct.unpack_from('<BHB' + endpoint_fmt, msg.data)
         val_pruned = val if endpoint_type != 'float' else struct.unpack('<f', struct.pack('<f', val))[0]
-        if return_value != val_pruned or (math.isnan(return_value) and math.isnan(val_pruned)):
-            raise Exception(f"failed to write {path}: {return_value} != {val_pruned}")
+        if return_value == val_pruned:
+            pass
+        else:
+            if math.isnan(return_value) != math.isnan(val_pruned):
+                raise Exception(f"failed to write {path}: {return_value} != {val_pruned}")
 
 
 async def restore_config(odrv: EndpointAccess, config: dict):
