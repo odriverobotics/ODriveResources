@@ -42,6 +42,7 @@ for msg in bus:
     if msg.arbitration_id == (node_id << 5 | 0x00): # 0x00: Get_Version
         break
 
+import struct
 _, hw_product_line, hw_version, hw_variant, fw_major, fw_minor, fw_revision, fw_unreleased = struct.unpack('<BBBBBBBB', msg.data)
 
 # If one of these asserts fail, you're probably not using the right flat_endpoints.json file
@@ -66,6 +67,12 @@ bus.send(can.Message(
     is_extended_id=False
 ))
 # -- end write
+
+# On firmware 0.6.11 or newer, the ODrive sends a confirmation for write
+# requests, so we insert a small delay so that the response doesn't get confused
+# for a response for the read request.
+import time
+time.sleep(0.1)
 
 # -- start read
 import struct

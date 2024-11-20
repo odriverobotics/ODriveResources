@@ -66,6 +66,9 @@ class EndpointAccess():
             is_extended_id=False
         ))
 
+        # Since firmware 0.6.11, the device returns a confirmation for the write,
+        # so we wait briefly to flush it before doing the read.
+        await asyncio.sleep(0.01)
         self.node.flush_rx()
 
         self.node.bus.send(can.Message(
@@ -79,11 +82,9 @@ class EndpointAccess():
         # Unpack and cpmpare reply
         _, _, _, return_value = struct.unpack_from('<BHB' + endpoint_fmt, msg.data)
         val_pruned = val if endpoint_type != 'float' else struct.unpack('<f', struct.pack('<f', val))[0]
-        if return_value == val_pruned:
-            pass
-        else:
-            if math.isnan(return_value) != math.isnan(val_pruned):
-                raise Exception(f"failed to write {path}: {return_value} != {val_pruned}")
+        matches = math.isnan(return_value) if math.isnan(val_pruned) else return_value == val_pruned
+        if not matches:
+            raise Exception(f"failed to write {path}: {return_value} != {val_pruned}")
 
 
 async def restore_config(odrv: EndpointAccess, config: dict):

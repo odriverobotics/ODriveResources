@@ -44,6 +44,7 @@ def get_address_msg(bus: can.Bus):
 def set_address_msg(bus, sn, node_id):
     msg = can.Message(
         arbitration_id=(BROADCAST_NODE_ID << 5) | ADDRESS_CMD,
+        # Connection_ID for firmware >=0.6.11 omitted (connectionless)
         data=bytes([node_id]) + sn.to_bytes(6, byteorder='little'),
         is_extended_id=False
     )
@@ -90,10 +91,10 @@ class Discoverer():
         set_address_msg(self.bus, serial_number, next_free_node_id)
         self.discovered_devices[serial_number] = next_free_node_id
 
-    def on_message_received(self, msg):
+    def on_message_received(self, msg: can.Message):
         cmd_id = msg.arbitration_id & 0x1F
 
-        if cmd_id == ADDRESS_CMD:
+        if cmd_id == ADDRESS_CMD and not msg.is_remote_frame:
             node_id = msg.data[0]
             serial_number = int.from_bytes(msg.data[1:7], byteorder='little')
 
