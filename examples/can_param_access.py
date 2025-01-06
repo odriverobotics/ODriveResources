@@ -26,6 +26,14 @@ node_id = 0 # must match the configured node_id on your ODrive (default 0)
 import can
 bus = can.interface.Bus("can0", bustype="socketcan")
 
+# When using ODrive USB-CAN adapter:
+# bus = can.interface.Bus(index=0, channel=0, bitrate=1000000, interface="gs_usb")
+
+# Make sure CAN interface is closed when script exits
+import atexit
+bus.__enter__()
+atexit.register(lambda: bus.__exit__(None, None, None))
+
 # -- start version check
 # Flush CAN RX buffer so there are no more old pending messages
 while not (bus.recv(timeout=0) is None): pass
@@ -39,7 +47,7 @@ bus.send(can.Message(
 
 # Await reply
 for msg in bus:
-    if msg.arbitration_id == (node_id << 5 | 0x00): # 0x00: Get_Version
+    if msg.is_rx and msg.arbitration_id == (node_id << 5 | 0x00): # 0x00: Get_Version
         break
 
 import struct
@@ -95,7 +103,7 @@ bus.send(can.Message(
 
 # Await reply
 for msg in bus:
-    if msg.arbitration_id == (node_id << 5 | 0x05): # 0x05: TxSdo
+    if msg.is_rx and msg.arbitration_id == (node_id << 5 | 0x05): # 0x05: TxSdo
         break
 
 # Unpack and print reply
