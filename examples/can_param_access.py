@@ -54,7 +54,7 @@ import struct
 _, hw_product_line, hw_version, hw_variant, fw_major, fw_minor, fw_revision, fw_unreleased = struct.unpack('<BBBBBBBB', msg.data)
 
 # If one of these asserts fail, you're probably not using the right flat_endpoints.json file
-assert endpoint_data['fw_version'] == f"{fw_major}.{fw_minor}.{fw_revision}"
+assert endpoint_data['fw_version'].partition('-')[0] == f"{fw_major}.{fw_minor}.{fw_revision}"
 assert endpoint_data['hw_version'] == f"{hw_product_line}.{hw_version}.{hw_variant}"
 # -- end version check
 
