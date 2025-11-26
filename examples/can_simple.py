@@ -26,9 +26,9 @@ node_id = 0 # must match `<odrv>.axis0.config.can.node_id`. The default is 0.
 bus = can.interface.Bus("can0", interface="socketcan")
 
 # Flush CAN RX buffer so there are no more old pending messages
-while bus.recv(timeout=0) is not None: pass
+while not (bus.recv(timeout=0) is None): pass
 
-# Put axis into closed loop control state (this feeds the watchdog once)
+# Put axis into closed loop control state
 bus.send(can.Message(
     arbitration_id=(node_id << 5 | 0x07), # 0x07: Set_Axis_State
     data=struct.pack('<I', 8), # 8: AxisState.CLOSED_LOOP_CONTROL
