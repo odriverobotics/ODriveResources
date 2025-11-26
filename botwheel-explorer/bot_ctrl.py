@@ -408,7 +408,7 @@ async def main():
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
     local_ip_addresses = get_local_ips_1()
-    bus = can.interface.Bus(args.can, bustype="socketcan")
+    bus = can.interface.Bus(args.can, interface="socketcan")
 
     # Flush CAN RX buffer so there are no more old pending messages
     while not (bus.recv(timeout=0) is None): pass

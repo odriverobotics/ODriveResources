@@ -15,7 +15,7 @@ import struct
 
 node_id = 0 # must match `<odrv>.axis0.config.can.node_id`. The default is 0.
 
-bus = can.interface.Bus("can0", bustype="socketcan")
+bus = can.interface.Bus("can0", interface="socketcan")
 
 # Flush CAN RX buffer so there are no more old pending messages
 while not (bus.recv(timeout=0) is None): pass
