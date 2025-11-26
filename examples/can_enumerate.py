@@ -270,7 +270,7 @@ async def main():
                 sys.exit(1)
             user_addresses[parts[0]] = num
 
-    with can.interface.Bus(args.channel, bustype=args.interface, bitrate=args.bitrate) as bus:
+    with can.interface.Bus(args.channel, interface=args.interface, bitrate=args.bitrate) as bus:
         if args.reboot_all:
             print("Broadcasting reboot command...")
             reboot_msg(bus, BROADCAST_NODE_ID, REBOOT_ACTION_REBOOT)

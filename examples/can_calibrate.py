@@ -18,7 +18,7 @@ async def main():
     args = parser.parse_args()
 
     print("opening CAN bus...")
-    with can.interface.Bus(args.channel, bustype=args.interface, bitrate=args.bitrate) as bus:
+    with can.interface.Bus(args.channel, interface=args.interface, bitrate=args.bitrate) as bus:
         with CanSimpleNode(bus=bus, node_id=args.node_id) as node:
             node.clear_errors_msg()
             node.set_state_msg(3) # AxisState.FULL_CALIBRATION_SEQUENCE

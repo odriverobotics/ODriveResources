@@ -111,7 +111,7 @@ async def main():
         config_list = json.load(f)
 
     print("opening CAN bus...")
-    with can.interface.Bus(args.channel, bustype=args.interface, bitrate=args.bitrate) as bus:
+    with can.interface.Bus(args.channel, interface=args.interface, bitrate=args.bitrate) as bus:
         #reader = can.AsyncBufferedReader()
         #notifier = can.Notifier(bus, [reader], loop=asyncio.get_running_loop())
         with CanSimpleNode(bus=bus, node_id=args.node_id) as node:

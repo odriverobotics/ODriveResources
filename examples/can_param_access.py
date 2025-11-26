@@ -24,7 +24,7 @@ node_id = 0 # must match the configured node_id on your ODrive (default 0)
 # -- end definitions
 
 import can
-bus = can.interface.Bus("can0", bustype="socketcan")
+bus = can.interface.Bus("can0", interface="socketcan")
 
 # When using ODrive USB-CAN adapter:
 # bus = can.interface.Bus(index=0, channel=0, bitrate=1000000, interface="gs_usb")
