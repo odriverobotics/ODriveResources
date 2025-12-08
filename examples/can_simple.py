@@ -50,16 +50,13 @@ def on_rx_message(msg: can.Message):
 
 # Control ODrive while notifier object exist
 with can.Notifier(bus, [on_rx_message]):
-    f = 0.5 # Hz
-    torque_ff = 0.0 # torque feedforward
-
     while True:
         velocity_setpoint = math.sin(2 * math.pi * 0.5 * time.monotonic()) # turns / s
 
         # Update velocity and reset watchdog timer 
         bus.send(can.Message(
             arbitration_id=(node_id << 5 | 0x0d), # 0x0d: Set_Input_Vel
-            data=struct.pack('<ff', velocity_setpoint, torque_ff),
+            data=struct.pack('<ff', velocity_setpoint, 0.0), # 0.0: torque feedforward
             is_extended_id=False
         ))
         time.sleep(0.1)
