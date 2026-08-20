@@ -125,3 +125,40 @@ bus.send(can.Message(
     is_extended_id=False
 ))
 # -- end function
+
+# save_configuration takes a moment and, on firmware 0.6.11 or newer, confirms
+# when it's done. Wait for that so it doesn't get confused for a response to the
+# function call below.
+import time
+time.sleep(0.5)
+
+# -- start call with args
+import struct
+
+path = 'get_adc_voltage'
+gpio = 1 # the GPIO must be in GpioMode.ANALOG_IN for the reading to be meaningful
+
+# Convert path to endpoint ID and look up the argument and return value types
+endpoint_id = endpoints[path]['id']
+in_format = ''.join(format_lookup[arg['type']] for arg in endpoints[path]['inputs'])
+out_format = ''.join(format_lookup[ret['type']] for ret in endpoints[path]['outputs'])
+
+# Flush CAN RX buffer so there are no more old pending messages
+while not (bus.recv(timeout=0) is None): pass
+
+# Send the call, with all arguments concatenated into the value field
+bus.send(can.Message(
+    arbitration_id=(node_id << 5 | 0x04), # 0x04: RxSdo
+    data=struct.pack('<BHB' + in_format, OPCODE_WRITE, endpoint_id, 0, gpio),
+    is_extended_id=False
+))
+
+# Await reply
+for msg in bus:
+    if msg.is_rx and msg.arbitration_id == (node_id << 5 | 0x05): # 0x05: TxSdo
+        break
+
+# Unpack and print the return values
+_, _, _, *return_values = struct.unpack_from('<BHB' + out_format, msg.data)
+print(f"received: {return_values}")
+# -- end call with args
